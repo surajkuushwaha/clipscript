@@ -21,7 +21,11 @@ func DownloadAudio(ctx context.Context, url, proxyURL string) (string, error) {
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 	// Remove the empty placeholder so yt-dlp can write to the path freely.
-	os.Remove(tmpPath)
+	_ = os.Remove(tmpPath)
+
+	// finalPath is the path yt-dlp will write: same stem, .mp3 extension.
+	// We compute it explicitly so the Stat check is unambiguous.
+	finalPath := strings.TrimSuffix(tmpPath, filepath.Ext(tmpPath)) + ".mp3"
 
 	dl := ytdlp.New().
 		ExtractAudio().
@@ -33,14 +37,14 @@ func DownloadAudio(ctx context.Context, url, proxyURL string) (string, error) {
 	}
 
 	if _, err := dl.Run(ctx, url); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(finalPath)
 		return "", fmt.Errorf("yt-dlp: %w", err)
 	}
 
-	// yt-dlp appends the extension; our path is already .mp3
-	if _, err := os.Stat(tmpPath); err != nil {
+	if _, err := os.Stat(finalPath); err != nil {
+		_ = os.Remove(finalPath)
 		return "", fmt.Errorf("audio file not found after download: %w", err)
 	}
 
-	return tmpPath, nil
+	return finalPath, nil
 }
