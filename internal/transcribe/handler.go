@@ -1,0 +1,128 @@
+// internal/transcribe/handler.go
+package transcribe
+
+import (
+	"context"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+// Handler holds config needed to serve transcription requests.
+type Handler struct {
+	GoWhisperURL   string
+	WhisperModel   string
+	RequestTimeout time.Duration
+	Proxy          ProxyProvider
+	// Injectable for testing
+	downloadFn   func(ctx context.Context, url, proxyURL string) (string, error)
+	transcribeFn func(ctx context.Context, goWhisperURL, model, audioPath, format string) (interface{}, float64, error)
+}
+
+// NewHandler builds a Handler from environment variables.
+func NewHandler() *Handler {
+	timeout := 120
+	if v, err := strconv.Atoi(os.Getenv("REQUEST_TIMEOUT")); err == nil && v > 0 {
+		timeout = v
+	}
+	goWhisperURL := os.Getenv("GOWHISPER_URL")
+	if goWhisperURL == "" {
+		goWhisperURL = "http://localhost:8081"
+	}
+	model := os.Getenv("WHISPER_MODEL")
+	if model == "" {
+		model = "ggml-base"
+	}
+	return &Handler{
+		GoWhisperURL:   goWhisperURL,
+		WhisperModel:   model,
+		RequestTimeout: time.Duration(timeout) * time.Second,
+		Proxy:          NewProxyProvider(),
+		downloadFn:     DownloadAudio,
+		transcribeFn:   TranscribeAudio,
+	}
+}
+
+// SetDownloadFn overrides the download function (for testing).
+func (h *Handler) SetDownloadFn(fn func(ctx context.Context, url, proxyURL string) (string, error)) {
+	h.downloadFn = fn
+}
+
+// SetTranscribeFn overrides the transcribe function (for testing).
+func (h *Handler) SetTranscribeFn(fn func(ctx context.Context, goWhisperURL, model, audioPath, format string) (interface{}, float64, error)) {
+	h.transcribeFn = fn
+}
+
+// Transcribe handles POST /v1/transcribe.
+func (h *Handler) Transcribe(c *fiber.Ctx) error {
+	var req TranscribeRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "invalid_request",
+			Message: "request body must be valid JSON with a 'url' field",
+		})
+	}
+
+	if req.Format == "" {
+		req.Format = "text"
+	}
+
+	if req.Format != "text" && req.Format != "segments" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "invalid_format",
+			Message: "format must be 'text' or 'segments'",
+		})
+	}
+
+	if err := ValidateURL(req.URL); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "invalid_url",
+			Message: err.Error(),
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), h.RequestTimeout)
+	defer cancel()
+
+	audioPath, err := h.downloadFn(ctx, req.URL, h.Proxy.ProxyURL())
+	if err != nil {
+		if ctx.Err() != nil {
+			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
+				Error:   "timeout",
+				Message: "processing exceeded timeout limit",
+			})
+		}
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(ErrorResponse{
+			Error:   "download_failed",
+			Message: err.Error(),
+		})
+	}
+	defer os.Remove(audioPath)
+
+	result, duration, err := h.transcribeFn(ctx, h.GoWhisperURL, h.WhisperModel, audioPath, req.Format)
+	if err != nil {
+		if ctx.Err() != nil {
+			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
+				Error:   "timeout",
+				Message: "processing exceeded timeout limit",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "transcription_failed",
+			Message: err.Error(),
+		})
+	}
+
+	if req.Format == "segments" {
+		return c.JSON(TranscribeSegmentsResponse{
+			Segments:        result.([]Segment),
+			DurationSeconds: duration,
+		})
+	}
+	return c.JSON(TranscribeTextResponse{
+		Transcript:      result.(string),
+		DurationSeconds: duration,
+	})
+}
