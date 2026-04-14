@@ -1,8 +1,9 @@
 package transcribe_test
 
 import (
-	"os"
+	"strings"
 	"testing"
+
 	"clipscript/internal/transcribe"
 )
 
@@ -23,7 +24,7 @@ func TestScraperAPIProxy(t *testing.T) {
 }
 
 func TestNewProxyProvider_None(t *testing.T) {
-	os.Setenv("PROXY_PROVIDER", "none")
+	t.Setenv("PROXY_PROVIDER", "none")
 	p := transcribe.NewProxyProvider()
 	if p.ProxyURL() != "" {
 		t.Errorf("expected empty proxy URL for provider=none")
@@ -31,10 +32,10 @@ func TestNewProxyProvider_None(t *testing.T) {
 }
 
 func TestNewProxyProvider_ScraperAPI(t *testing.T) {
-	os.Setenv("PROXY_PROVIDER", "scraperapi")
-	os.Setenv("SCRAPER_API_KEY", "mykey")
+	t.Setenv("PROXY_PROVIDER", "scraperapi")
+	t.Setenv("SCRAPER_API_KEY", "mykey")
 	p := transcribe.NewProxyProvider()
-	if p.ProxyURL() == "" {
-		t.Errorf("expected non-empty proxy URL for provider=scraperapi")
+	if got := p.ProxyURL(); !strings.Contains(got, "mykey") {
+		t.Errorf("expected proxy URL to contain API key, got %q", got)
 	}
 }
