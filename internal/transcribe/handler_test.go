@@ -35,12 +35,7 @@ func newHandler() *transcribe.Handler {
 }
 
 func doRequest(app *fiber.App, body string) (*http.Response, error) {
-	var reqBody *strings.Reader
-	if body != "" {
-		reqBody = strings.NewReader(body)
-	} else {
-		reqBody = strings.NewReader("")
-	}
+	reqBody := strings.NewReader(body)
 	req, err := http.NewRequest(http.MethodPost, "/v1/transcribe", reqBody)
 	if err != nil {
 		return nil, err
