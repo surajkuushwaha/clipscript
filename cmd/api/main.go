@@ -12,7 +12,6 @@ import (
 	"time"
 
 	_ "github.com/joho/godotenv/autoload"
-	_ "github.com/lrstanley/go-ytdlp"
 )
 
 func gracefulShutdown(fiberServer *server.FiberServer, done chan bool) {
