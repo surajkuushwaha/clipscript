@@ -38,7 +38,7 @@ Then download a Whisper model (first time only):
 ```bash
 curl -X POST http://localhost:8081/api/whisper/model \
   -H "Content-Type: application/json" \
-  -d '{"model": "ggml-base"}'
+  -d '{"model": "ggml-base.bin"}'
 ```
 
 > The model is cached in a Docker volume — only needed once.
@@ -65,7 +65,7 @@ docker run -d --name whisper-server \
 ```bash
 curl -X POST http://localhost:8081/api/whisper/model \
   -H "Content-Type: application/json" \
-  -d '{"model": "ggml-base"}'
+  -d '{"model": "ggml-base.bin"}'
 ```
 
 **4. Start the Go API:**
@@ -136,24 +136,24 @@ All config via environment variables (copy `.env.example` to `.env`):
 | `PORT`            | `8080`                    | Go API port                                          |
 | `GOWHISPER_URL`   | `http://localhost:8081`   | go-whisper server address                            |
 | `REQUEST_TIMEOUT` | `120`                     | Max seconds for full pipeline (download + transcription) |
-| `WHISPER_MODEL`   | `ggml-base`               | Model ID (must be pre-downloaded in go-whisper)      |
+| `WHISPER_MODEL`   | `ggml-base.bin`           | Model ID (must be pre-downloaded in go-whisper)      |
 | `PROXY_PROVIDER`  | `none`                    | Proxy: `none` or `scraperapi`                        |
 | `SCRAPER_API_KEY` | —                         | Required when `PROXY_PROVIDER=scraperapi`            |
 
 ### Whisper model trade-offs
 
-| Model          | Size   | Speed  | Accuracy |
-|----------------|--------|--------|----------|
-| `ggml-tiny`    | ~75MB  | fast   | low      |
-| `ggml-base`    | ~145MB | fast   | good     |
-| `ggml-small`   | ~465MB | medium | better   |
-| `ggml-medium`  | ~1.5GB | slow   | best     |
+| Model              | Size   | Speed  | Accuracy |
+|--------------------|--------|--------|----------|
+| `ggml-tiny.bin`    | ~75MB  | fast   | low      |
+| `ggml-base.bin`    | ~145MB | fast   | good     |
+| `ggml-small.bin`   | ~465MB | medium | better   |
+| `ggml-medium.bin`  | ~1.5GB | slow   | best     |
 
 Download a model:
 ```bash
 curl -X POST http://localhost:8081/api/whisper/model \
   -H "Content-Type: application/json" \
-  -d '{"model": "ggml-small"}'
+  -d '{"model": "ggml-small.bin"}'
 ```
 
 ### Proxy support

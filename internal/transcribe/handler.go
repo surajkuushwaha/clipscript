@@ -33,7 +33,7 @@ func NewHandler() *Handler {
 	}
 	model := os.Getenv("WHISPER_MODEL")
 	if model == "" {
-		model = "ggml-base"
+		model = "ggml-base.bin"
 	}
 	return &Handler{
 		GoWhisperURL:   goWhisperURL,
