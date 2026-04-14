@@ -33,7 +33,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Then download a Whisper model (first time only):
+**Using a local model** (first time only — cached in Docker volume):
 
 ```bash
 curl -X POST http://localhost:8081/api/whisper/model \
@@ -41,7 +41,15 @@ curl -X POST http://localhost:8081/api/whisper/model \
   -d '{"model": "ggml-base.bin"}'
 ```
 
-> The model is cached in a Docker volume — only needed once.
+**Using OpenAI Whisper API instead** (no local model download needed):
+
+```bash
+# In .env:
+OPENAI_API_KEY=sk-...
+WHISPER_MODEL=whisper-1
+```
+
+Then restart: `docker compose up`
 
 ### Option B — Manual
 
@@ -139,6 +147,7 @@ All config via environment variables (copy `.env.example` to `.env`):
 | `WHISPER_MODEL`   | `ggml-base.bin`           | Model ID (must be pre-downloaded in go-whisper)      |
 | `PROXY_PROVIDER`  | `none`                    | Proxy: `none` or `scraperapi`                        |
 | `SCRAPER_API_KEY` | —                         | Required when `PROXY_PROVIDER=scraperapi`            |
+| `OPENAI_API_KEY`  | —                         | Optional — routes transcription through OpenAI API; set `WHISPER_MODEL=whisper-1` |
 
 ### Whisper model trade-offs
 

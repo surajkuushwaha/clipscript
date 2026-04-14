@@ -6,6 +6,10 @@ services:
       - "8081:8081"
     volumes:
       - whisper-models:/data
+    environment:
+      # Set to use OpenAI Whisper API instead of local model.
+      # When set, use WHISPER_MODEL=whisper-1 in .env
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     restart: unless-stopped
 
   api:
