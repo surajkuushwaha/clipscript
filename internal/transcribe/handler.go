@@ -1,8 +1,8 @@
-// internal/transcribe/handler.go
 package transcribe
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strconv"
 	"time"
@@ -55,6 +55,11 @@ func (h *Handler) SetTranscribeFn(fn func(ctx context.Context, goWhisperURL, mod
 	h.transcribeFn = fn
 }
 
+// isTimeout reports whether err is a context deadline or cancellation error.
+func isTimeout(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
 // Transcribe handles POST /v1/transcribe.
 func (h *Handler) Transcribe(c *fiber.Ctx) error {
 	var req TranscribeRequest
@@ -88,7 +93,7 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 
 	audioPath, err := h.downloadFn(ctx, req.URL, h.Proxy.ProxyURL())
 	if err != nil {
-		if ctx.Err() != nil {
+		if isTimeout(err) {
 			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
 				Error:   "timeout",
 				Message: "processing exceeded timeout limit",
@@ -99,11 +104,11 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 			Message: err.Error(),
 		})
 	}
-	defer os.Remove(audioPath)
+	defer func() { _ = os.Remove(audioPath) }()
 
 	result, duration, err := h.transcribeFn(ctx, h.GoWhisperURL, h.WhisperModel, audioPath, req.Format)
 	if err != nil {
-		if ctx.Err() != nil {
+		if isTimeout(err) {
 			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
 				Error:   "timeout",
 				Message: "processing exceeded timeout limit",
@@ -116,13 +121,22 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 	}
 
 	if req.Format == "segments" {
-		return c.JSON(TranscribeSegmentsResponse{
-			Segments:        result.([]Segment),
-			DurationSeconds: duration,
+		segs, ok := result.([]Segment)
+		if !ok {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error:   "internal_error",
+				Message: "unexpected result type from transcription",
+			})
+		}
+		return c.JSON(TranscribeSegmentsResponse{Segments: segs, DurationSeconds: duration})
+	}
+
+	text, ok := result.(string)
+	if !ok {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "internal_error",
+			Message: "unexpected result type from transcription",
 		})
 	}
-	return c.JSON(TranscribeTextResponse{
-		Transcript:      result.(string),
-		DurationSeconds: duration,
-	})
+	return c.JSON(TranscribeTextResponse{Transcript: text, DurationSeconds: duration})
 }
