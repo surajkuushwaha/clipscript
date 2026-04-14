@@ -18,7 +18,7 @@ type Handler struct {
 	Proxy          ProxyProvider
 	// Injectable for testing
 	downloadFn   func(ctx context.Context, url, proxyURL string) (string, error)
-	transcribeFn func(ctx context.Context, goWhisperURL, model, audioPath, format string) (interface{}, float64, error)
+	transcribeFn func(ctx context.Context, goWhisperURL, model, audioPath, format, language string) (interface{}, float64, error)
 }
 
 // NewHandler builds a Handler from environment variables.
@@ -51,7 +51,7 @@ func (h *Handler) SetDownloadFn(fn func(ctx context.Context, url, proxyURL strin
 }
 
 // SetTranscribeFn overrides the transcribe function (for testing).
-func (h *Handler) SetTranscribeFn(fn func(ctx context.Context, goWhisperURL, model, audioPath, format string) (interface{}, float64, error)) {
+func (h *Handler) SetTranscribeFn(fn func(ctx context.Context, goWhisperURL, model, audioPath, format, language string) (interface{}, float64, error)) {
 	h.transcribeFn = fn
 }
 
@@ -106,7 +106,7 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 	}
 	defer func() { _ = os.Remove(audioPath) }()
 
-	result, duration, err := h.transcribeFn(ctx, h.GoWhisperURL, h.WhisperModel, audioPath, req.Format)
+	result, duration, err := h.transcribeFn(ctx, h.GoWhisperURL, h.WhisperModel, audioPath, req.Format, req.Language)
 	if err != nil {
 		if isTimeout(err) {
 			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{

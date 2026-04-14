@@ -1,4 +1,3 @@
-// internal/transcribe/whisper.go
 package transcribe
 
 import (
@@ -25,9 +24,11 @@ type whisperJSONResponse struct {
 
 // TranscribeAudio uploads audioPath to the go-whisper server and returns
 // the transcript in the requested format ("text" or "segments").
-// goWhisperURL is the base URL, e.g. "http://localhost:8081".
-// model is the ggml model ID, e.g. "ggml-base".
-func TranscribeAudio(ctx context.Context, goWhisperURL, model, audioPath, format string) (interface{}, float64, error) {
+//
+// language controls the endpoint used:
+//   - ""  → POST /api/whisper/translate  (always outputs English)
+//   - "hi", "ur", etc. → POST /api/whisper/transcribe with language hint
+func TranscribeAudio(ctx context.Context, goWhisperURL, model, audioPath, format, language string) (interface{}, float64, error) {
 	f, err := os.Open(audioPath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open audio file: %w", err)
@@ -47,12 +48,21 @@ func TranscribeAudio(ctx context.Context, goWhisperURL, model, audioPath, format
 	if err := mw.WriteField("model", model); err != nil {
 		return nil, 0, fmt.Errorf("write model field: %w", err)
 	}
+
+	// Route: no language → translate to English; language set → transcribe in that language.
+	endpoint := "/api/whisper/translate"
+	if language != "" {
+		endpoint = "/api/whisper/transcribe"
+		if err := mw.WriteField("language", language); err != nil {
+			return nil, 0, fmt.Errorf("write language field: %w", err)
+		}
+	}
+
 	if err := mw.Close(); err != nil {
 		return nil, 0, fmt.Errorf("close multipart writer: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		goWhisperURL+"/api/whisper/transcribe", &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, goWhisperURL+endpoint, &buf)
 	if err != nil {
 		return nil, 0, fmt.Errorf("build request: %w", err)
 	}

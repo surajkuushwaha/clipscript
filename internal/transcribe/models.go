@@ -3,8 +3,9 @@ package transcribe
 
 // TranscribeRequest is the public API request body.
 type TranscribeRequest struct {
-	URL    string `json:"url"`
-	Format string `json:"format"` // "text" or "segments"; default "text"
+	URL      string `json:"url"`
+	Format   string `json:"format"`   // "text" or "segments"; default "text"
+	Language string `json:"language"` // optional BCP-47 code (e.g. "hi", "ur"); empty = translate to English
 }
 
 // Segment is a timestamped transcript chunk.

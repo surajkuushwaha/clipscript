@@ -28,7 +28,7 @@ func newHandler() *transcribe.Handler {
 	h.SetDownloadFn(func(_ context.Context, _, _ string) (string, error) {
 		return "/tmp/fake-audio.mp3", nil
 	})
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
 		return "hello world", 12.5, nil
 	})
 	return h
@@ -160,7 +160,7 @@ func TestTranscribe_DownloadTimeout(t *testing.T) {
 
 func TestTranscribe_TranscriptionFailed(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
 		return nil, 0, errors.New("whisper error")
 	})
 	app := newTestApp(h)
@@ -183,7 +183,7 @@ func TestTranscribe_TranscriptionFailed(t *testing.T) {
 
 func TestTranscribe_TextSuccess(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
 		return "hello world", 12.5, nil
 	})
 	app := newTestApp(h)
@@ -213,7 +213,7 @@ func TestTranscribe_TextSuccess(t *testing.T) {
 
 func TestTranscribe_SegmentsSuccess(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
 		return []transcribe.Segment{{Start: 0.0, End: 3.4, Text: "hello"}}, 3.4, nil
 	})
 	app := newTestApp(h)
@@ -247,7 +247,7 @@ func TestTranscribe_SegmentsSuccess(t *testing.T) {
 
 func TestTranscribe_DefaultFormat(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, format string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, format, _ string) (interface{}, float64, error) {
 		if format != "text" {
 			return nil, 0, errors.New("unexpected format: " + format)
 		}
@@ -277,11 +277,11 @@ func TestTranscribe_DefaultFormat(t *testing.T) {
 	}
 }
 
-// ── 10. Wrong Type From TranscribeFn ──────────────────────────────────────────
+// ── 10. Wrong Type From TranscribeFn ─────────────────────────────────────────
 
 func TestTranscribe_WrongTypeFromTranscribeFn(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
 		return 42, 0, nil // wrong type — neither string nor []Segment
 	})
 	app := newTestApp(h)
@@ -297,5 +297,68 @@ func TestTranscribe_WrongTypeFromTranscribeFn(t *testing.T) {
 	result := decodeError(resp)
 	if result.Error != "internal_error" {
 		t.Errorf("expected error=internal_error, got %q", result.Error)
+	}
+}
+
+// ── 11. Default language → translate endpoint ──────────────────────────────────
+
+func TestTranscribe_DefaultLanguageTranslates(t *testing.T) {
+	h := newHandler()
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, language string) (interface{}, float64, error) {
+		if language != "" {
+			return nil, 0, errors.New("expected empty language for translate mode, got: " + language)
+		}
+		return "translated english text", 10.0, nil
+	})
+	app := newTestApp(h)
+
+	// No language field — should use translate endpoint (language="").
+	body := `{"url":"https://www.youtube.com/shorts/abc123","format":"text"}`
+	resp, err := doRequest(app, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(resp.Body)
+		t.Fatalf("expected 200, got %d — body: %s", resp.StatusCode, buf.String())
+	}
+	var result transcribe.TranscribeTextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Transcript != "translated english text" {
+		t.Errorf("expected translated english text, got %q", result.Transcript)
+	}
+}
+
+// ── 12. With language → transcribe endpoint ────────────────────────────────────
+
+func TestTranscribe_WithLanguageTranscribes(t *testing.T) {
+	h := newHandler()
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, language string) (interface{}, float64, error) {
+		if language != "hi" {
+			return nil, 0, errors.New("expected language=hi, got: " + language)
+		}
+		return "हिन्दी text", 8.0, nil
+	})
+	app := newTestApp(h)
+
+	body := `{"url":"https://www.youtube.com/shorts/abc123","format":"text","language":"hi"}`
+	resp, err := doRequest(app, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(resp.Body)
+		t.Fatalf("expected 200, got %d — body: %s", resp.StatusCode, buf.String())
+	}
+	var result transcribe.TranscribeTextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Transcript != "हिन्दी text" {
+		t.Errorf("expected हिन्दी text, got %q", result.Transcript)
 	}
 }
