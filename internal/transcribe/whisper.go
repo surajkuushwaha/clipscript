@@ -47,7 +47,9 @@ func TranscribeAudio(ctx context.Context, goWhisperURL, model, audioPath, format
 	if err := mw.WriteField("model", model); err != nil {
 		return nil, 0, fmt.Errorf("write model field: %w", err)
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		return nil, 0, fmt.Errorf("close multipart writer: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		goWhisperURL+"/api/whisper/transcribe", &buf)
