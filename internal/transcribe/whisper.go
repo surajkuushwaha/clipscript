@@ -98,7 +98,13 @@ func TranscribeAudio(ctx context.Context, goWhisperURL, model, audioPath, format
 		for i, s := range parsed.Segments {
 			segments[i] = Segment{Start: s.Start, End: s.End, Text: s.Text}
 		}
-		return segments, parsed.Duration, nil
+		// go-whisper JSON response has no top-level duration field.
+		// Fall back to last segment's end time.
+		duration := parsed.Duration
+		if duration == 0 && len(parsed.Segments) > 0 {
+			duration = parsed.Segments[len(parsed.Segments)-1].End
+		}
+		return segments, duration, nil
 	}
 
 	// text/plain — body is the raw transcript

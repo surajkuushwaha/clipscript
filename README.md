@@ -99,10 +99,16 @@ Content-Type: application/json
 }
 ```
 
-| Field    | Required | Values                           | Default  |
-|----------|----------|----------------------------------|----------|
-| `url`    | yes      | Instagram Reel or YouTube Shorts URL | —    |
-| `format` | no       | `"text"` or `"segments"`         | `"text"` |
+| Field      | Required | Values                               | Default  |
+|------------|----------|--------------------------------------|----------|
+| `url`      | yes      | Instagram Reel or YouTube Shorts URL | —        |
+| `format`   | no       | `"text"` or `"segments"`             | `"text"` |
+| `language` | no       | BCP-47 code e.g. `"hi"`, `"ur"`, `"fr"` | —    |
+
+**`language` field behaviour:**
+- **Omitted (default)** — uses the translate endpoint → output is always **English**, regardless of audio language. Best for Hinglish / mixed-language content.
+- **Provided** (e.g. `"hi"`) — uses the transcribe endpoint with that language as a source hint → output stays in that language with better accuracy.
+- `language` is a **source** language hint (what language the audio is in), not an output language selector. Setting `language="en"` on Hindi audio still produces Hindi output.
 
 **Response (format=text):**
 ```json
