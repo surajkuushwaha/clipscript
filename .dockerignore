@@ -1,0 +1,8 @@
+.git
+.worktrees
+worktrees
+*.md
+.env
+.air.toml
+docs/
+main

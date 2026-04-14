@@ -1,0 +1,25 @@
+services:
+  whisper:
+    image: ghcr.io/mutablelogic/go-whisper:latest
+    command: run
+    ports:
+      - "8081:8081"
+    volumes:
+      - whisper-models:/data
+    restart: unless-stopped
+
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      # Override so api container reaches whisper by service name
+      GOWHISPER_URL: http://whisper:8081
+    depends_on:
+      - whisper
+    restart: unless-stopped
+
+volumes:
+  whisper-models:

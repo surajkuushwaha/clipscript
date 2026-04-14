@@ -24,19 +24,39 @@ No Python. No shared filesystem. Audio uploaded directly via multipart to go-whi
 
 ## Setup
 
-**1. Clone and configure:**
+### Option A — Docker Compose (recommended)
+
+```bash
+cp .env.example .env
+# Edit .env with your settings (PROXY_PROVIDER, SCRAPER_API_KEY, etc.)
+
+docker compose up --build
+```
+
+Then download a Whisper model (first time only):
+
+```bash
+curl -X POST http://localhost:8081/api/whisper/model \
+  -H "Content-Type: application/json" \
+  -d '{"model": "ggml-base"}'
+```
+
+> The model is cached in a Docker volume — only needed once.
+
+### Option B — Manual
+
+**1. Configure:**
 
 ```bash
 cp .env.example .env
 # Edit .env with your settings
 ```
 
-**2. Start go-whisper (transcription server):**
+**2. Start go-whisper:**
 
 ```bash
-docker volume create whisper
 docker run -d --name whisper-server \
-  -v whisper:/data -p 8081:8081 \
+  -v whisper-models:/data -p 8081:8081 \
   ghcr.io/mutablelogic/go-whisper run
 ```
 
@@ -47,8 +67,6 @@ curl -X POST http://localhost:8081/api/whisper/model \
   -H "Content-Type: application/json" \
   -d '{"model": "ggml-base"}'
 ```
-
-> First model download may take a minute. Model stays cached in the Docker volume.
 
 **4. Start the Go API:**
 
