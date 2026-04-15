@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git
+
+Never commit with Claude as the author. Use the repo's configured git user only.
+
 ## Commands
 
 ```bash
