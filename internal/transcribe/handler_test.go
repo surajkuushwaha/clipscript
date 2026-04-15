@@ -28,7 +28,7 @@ func newHandler() *transcribe.Handler {
 	h.SetDownloadFn(func(_ context.Context, _, _ string) (string, error) {
 		return "/tmp/fake-audio.mp3", nil
 	})
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return "hello world", 12.5, nil
 	})
 	return h
@@ -160,7 +160,7 @@ func TestTranscribe_DownloadTimeout(t *testing.T) {
 
 func TestTranscribe_TranscriptionFailed(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return nil, 0, errors.New("whisper error")
 	})
 	app := newTestApp(h)
@@ -183,7 +183,7 @@ func TestTranscribe_TranscriptionFailed(t *testing.T) {
 
 func TestTranscribe_TextSuccess(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return "hello world", 12.5, nil
 	})
 	app := newTestApp(h)
@@ -213,7 +213,7 @@ func TestTranscribe_TextSuccess(t *testing.T) {
 
 func TestTranscribe_SegmentsSuccess(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return []transcribe.Segment{{Start: 0.0, End: 3.4, Text: "hello"}}, 3.4, nil
 	})
 	app := newTestApp(h)
@@ -247,7 +247,7 @@ func TestTranscribe_SegmentsSuccess(t *testing.T) {
 
 func TestTranscribe_DefaultFormat(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, format, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, format, _, _ string) (interface{}, float64, error) {
 		if format != "text" {
 			return nil, 0, errors.New("unexpected format: " + format)
 		}
@@ -281,7 +281,7 @@ func TestTranscribe_DefaultFormat(t *testing.T) {
 
 func TestTranscribe_WrongTypeFromTranscribeFn(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _ string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return 42, 0, nil // wrong type — neither string nor []Segment
 	})
 	app := newTestApp(h)
@@ -304,7 +304,7 @@ func TestTranscribe_WrongTypeFromTranscribeFn(t *testing.T) {
 
 func TestTranscribe_DefaultLanguageTranslates(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, language string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, language, _ string) (interface{}, float64, error) {
 		if language != "" {
 			return nil, 0, errors.New("expected empty language for translate mode, got: " + language)
 		}
@@ -336,7 +336,7 @@ func TestTranscribe_DefaultLanguageTranslates(t *testing.T) {
 
 func TestTranscribe_WithLanguageTranscribes(t *testing.T) {
 	h := newHandler()
-	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, language string) (interface{}, float64, error) {
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, language, _ string) (interface{}, float64, error) {
 		if language != "hi" {
 			return nil, 0, errors.New("expected language=hi, got: " + language)
 		}

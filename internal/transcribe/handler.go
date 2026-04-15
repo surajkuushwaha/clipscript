@@ -14,11 +14,12 @@ import (
 type Handler struct {
 	GoWhisperURL   string
 	WhisperModel   string
+	OpenAIKey      string
 	RequestTimeout time.Duration
 	Proxy          ProxyProvider
 	// Injectable for testing
 	downloadFn   func(ctx context.Context, url, proxyURL string) (string, error)
-	transcribeFn func(ctx context.Context, goWhisperURL, model, audioPath, format, language string) (interface{}, float64, error)
+	transcribeFn func(ctx context.Context, goWhisperURL, model, audioPath, format, language, openAIKey string) (interface{}, float64, error)
 }
 
 // NewHandler builds a Handler from environment variables.
@@ -38,6 +39,7 @@ func NewHandler() *Handler {
 	return &Handler{
 		GoWhisperURL:   goWhisperURL,
 		WhisperModel:   model,
+		OpenAIKey:      os.Getenv("OPENAI_API_KEY"),
 		RequestTimeout: time.Duration(timeout) * time.Second,
 		Proxy:          NewProxyProvider(),
 		downloadFn:     DownloadAudio,
@@ -51,7 +53,7 @@ func (h *Handler) SetDownloadFn(fn func(ctx context.Context, url, proxyURL strin
 }
 
 // SetTranscribeFn overrides the transcribe function (for testing).
-func (h *Handler) SetTranscribeFn(fn func(ctx context.Context, goWhisperURL, model, audioPath, format, language string) (interface{}, float64, error)) {
+func (h *Handler) SetTranscribeFn(fn func(ctx context.Context, goWhisperURL, model, audioPath, format, language, openAIKey string) (interface{}, float64, error)) {
 	h.transcribeFn = fn
 }
 
@@ -106,7 +108,7 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 	}
 	defer func() { _ = os.Remove(audioPath) }()
 
-	result, duration, err := h.transcribeFn(ctx, h.GoWhisperURL, h.WhisperModel, audioPath, req.Format, req.Language)
+	result, duration, err := h.transcribeFn(ctx, h.GoWhisperURL, h.WhisperModel, audioPath, req.Format, req.Language, h.OpenAIKey)
 	if err != nil {
 		if isTimeout(err) {
 			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
