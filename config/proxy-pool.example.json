@@ -1,0 +1,13 @@
+{
+  "proxies": [
+    {
+      "id": "scraper-sample",
+      "scheme": "http",
+      "host": "proxy-server.scraperapi.com",
+      "port": 8001,
+      "username": "scraperapi",
+      "password": "${SCRAPER_API_KEY}"
+    }
+  ],
+  "selection": "round_robin"
+}

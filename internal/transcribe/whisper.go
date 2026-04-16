@@ -8,9 +8,21 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// apiHTTPClient never uses HTTP_PROXY / HTTPS_PROXY. Download proxies apply only to
+// yt-dlp in downloader.go; transcription must talk directly to go-whisper and OpenAI.
+var apiHTTPClient = func() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = func(*http.Request) (*url.URL, error) {
+		return nil, nil // direct connection; do not use environment proxy
+	}
+	return &http.Client{Transport: t}
+}()
 
 // whisperJSONResponse is the go-whisper JSON transcription response shape.
 type whisperJSONResponse struct {
@@ -87,7 +99,7 @@ func transcribeOpenAIDirect(ctx context.Context, apiKey, model, audioPath, forma
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := apiHTTPClient.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("openai request: %w", err)
 	}
@@ -161,13 +173,9 @@ func transcribeViaGoWhisper(ctx context.Context, goWhisperURL, model, audioPath,
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
-	if format == "segments" {
-		req.Header.Set("Accept", "application/json")
-	} else {
-		req.Header.Set("Accept", "text/plain")
-	}
+	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := apiHTTPClient.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("whisper request: %w", err)
 	}
@@ -181,21 +189,26 @@ func transcribeViaGoWhisper(ctx context.Context, goWhisperURL, model, audioPath,
 		return nil, 0, fmt.Errorf("go-whisper returned %d: %s", resp.StatusCode, body)
 	}
 
+	var parsed whisperJSONResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, 0, fmt.Errorf("parse whisper JSON: %w", err)
+	}
+	duration := parsed.Duration
+	if duration == 0 && len(parsed.Segments) > 0 {
+		duration = parsed.Segments[len(parsed.Segments)-1].End
+	}
+
 	if format == "segments" {
-		var parsed whisperJSONResponse
-		if err := json.Unmarshal(body, &parsed); err != nil {
-			return nil, 0, fmt.Errorf("parse whisper JSON: %w", err)
-		}
 		segments := make([]Segment, len(parsed.Segments))
 		for i, s := range parsed.Segments {
 			segments[i] = Segment{Start: s.Start, End: s.End, Text: s.Text}
 		}
-		duration := parsed.Duration
-		if duration == 0 && len(parsed.Segments) > 0 {
-			duration = parsed.Segments[len(parsed.Segments)-1].End
-		}
 		return segments, duration, nil
 	}
 
-	return string(body), 0, nil
+	var sb strings.Builder
+	for _, s := range parsed.Segments {
+		sb.WriteString(s.Text)
+	}
+	return sb.String(), duration, nil
 }

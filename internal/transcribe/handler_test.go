@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -22,7 +23,11 @@ func newTestApp(h *transcribe.Handler) *fiber.App {
 }
 
 // newHandler returns a Handler with no-op fns to avoid real network calls.
-func newHandler() *transcribe.Handler {
+func newHandler(t *testing.T) *transcribe.Handler {
+	t.Helper()
+	t.Setenv("PROXY_POOL", "")
+	t.Setenv("PROXY_POOL_FILE", "")
+	t.Setenv("USE_EMBEDDED_PROXY_POOL", "")
 	h := transcribe.NewHandler()
 	// Default stubs — each test overrides what it needs.
 	h.SetDownloadFn(func(_ context.Context, _, _ string) (string, error) {
@@ -54,7 +59,7 @@ func decodeError(resp *http.Response) transcribe.ErrorResponse {
 // ── 1. Invalid JSON ────────────────────────────────────────────────────────────
 
 func TestTranscribe_InvalidJSON(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	app := newTestApp(h)
 
 	resp, err := doRequest(app, "not-json")
@@ -73,7 +78,7 @@ func TestTranscribe_InvalidJSON(t *testing.T) {
 // ── 2. Invalid URL ─────────────────────────────────────────────────────────────
 
 func TestTranscribe_InvalidURL(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	app := newTestApp(h)
 
 	body := `{"url":"https://www.tiktok.com/@user/video/123","format":"text"}`
@@ -93,7 +98,7 @@ func TestTranscribe_InvalidURL(t *testing.T) {
 // ── 3. Invalid Format ──────────────────────────────────────────────────────────
 
 func TestTranscribe_InvalidFormat(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	app := newTestApp(h)
 
 	body := `{"url":"https://www.youtube.com/shorts/abc123","format":"srt"}`
@@ -113,7 +118,7 @@ func TestTranscribe_InvalidFormat(t *testing.T) {
 // ── 4. Download Failed ─────────────────────────────────────────────────────────
 
 func TestTranscribe_DownloadFailed(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetDownloadFn(func(_ context.Context, _, _ string) (string, error) {
 		return "", errors.New("network error")
 	})
@@ -136,7 +141,7 @@ func TestTranscribe_DownloadFailed(t *testing.T) {
 // ── 5. Download Timeout ────────────────────────────────────────────────────────
 
 func TestTranscribe_DownloadTimeout(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetDownloadFn(func(_ context.Context, _, _ string) (string, error) {
 		return "", context.DeadlineExceeded
 	})
@@ -159,7 +164,7 @@ func TestTranscribe_DownloadTimeout(t *testing.T) {
 // ── 6. Transcription Failed ────────────────────────────────────────────────────
 
 func TestTranscribe_TranscriptionFailed(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return nil, 0, errors.New("whisper error")
 	})
@@ -182,7 +187,7 @@ func TestTranscribe_TranscriptionFailed(t *testing.T) {
 // ── 7. Text Success ────────────────────────────────────────────────────────────
 
 func TestTranscribe_TextSuccess(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return "hello world", 12.5, nil
 	})
@@ -207,12 +212,38 @@ func TestTranscribe_TextSuccess(t *testing.T) {
 	if result.DurationSeconds != 12.5 {
 		t.Errorf("expected duration_seconds=12.5, got %f", result.DurationSeconds)
 	}
+	if result.Proxy.Source != "none" {
+		t.Errorf("expected proxy.source=none, got %q", result.Proxy.Source)
+	}
+	if result.Proxy.Status != transcribe.ProxyStatusNotUsed {
+		t.Errorf("expected proxy.status=not_used, got %q", result.Proxy.Status)
+	}
+}
+
+func TestTranscribe_SuccessBodyIncludesProxyKey(t *testing.T) {
+	h := newHandler(t)
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
+		return "x", 1.0, nil
+	})
+	app := newTestApp(h)
+	resp, err := doRequest(app, `{"url":"https://www.youtube.com/shorts/abc123","format":"text"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"proxy"`)) || !bytes.Contains(raw, []byte(`"not_used"`)) {
+		t.Fatalf("expected JSON to include proxy + not_used, got: %s", raw)
+	}
 }
 
 // ── 8. Segments Success ────────────────────────────────────────────────────────
 
 func TestTranscribe_SegmentsSuccess(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return []transcribe.Segment{{Start: 0.0, End: 3.4, Text: "hello"}}, 3.4, nil
 	})
@@ -246,7 +277,7 @@ func TestTranscribe_SegmentsSuccess(t *testing.T) {
 // ── 9. Default Format ──────────────────────────────────────────────────────────
 
 func TestTranscribe_DefaultFormat(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetTranscribeFn(func(_ context.Context, _, _, _, format, _, _ string) (interface{}, float64, error) {
 		if format != "text" {
 			return nil, 0, errors.New("unexpected format: " + format)
@@ -280,7 +311,7 @@ func TestTranscribe_DefaultFormat(t *testing.T) {
 // ── 10. Wrong Type From TranscribeFn ─────────────────────────────────────────
 
 func TestTranscribe_WrongTypeFromTranscribeFn(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return 42, 0, nil // wrong type — neither string nor []Segment
 	})
@@ -303,7 +334,7 @@ func TestTranscribe_WrongTypeFromTranscribeFn(t *testing.T) {
 // ── 11. Default language → translate endpoint ──────────────────────────────────
 
 func TestTranscribe_DefaultLanguageTranslates(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, language, _ string) (interface{}, float64, error) {
 		if language != "" {
 			return nil, 0, errors.New("expected empty language for translate mode, got: " + language)
@@ -335,7 +366,7 @@ func TestTranscribe_DefaultLanguageTranslates(t *testing.T) {
 // ── 12. With language → transcribe endpoint ────────────────────────────────────
 
 func TestTranscribe_WithLanguageTranscribes(t *testing.T) {
-	h := newHandler()
+	h := newHandler(t)
 	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, language, _ string) (interface{}, float64, error) {
 		if language != "hi" {
 			return nil, 0, errors.New("expected language=hi, got: " + language)

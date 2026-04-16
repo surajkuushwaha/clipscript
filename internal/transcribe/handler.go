@@ -93,17 +93,22 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), h.RequestTimeout)
 	defer cancel()
 
-	audioPath, err := h.downloadFn(ctx, req.URL, h.Proxy.ProxyURL())
+	usedProxy := h.Proxy.ProxyURL()
+	px := describeProxy(h.Proxy, usedProxy)
+
+	audioPath, err := h.downloadFn(ctx, req.URL, usedProxy)
 	if err != nil {
 		if isTimeout(err) {
 			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
 				Error:   "timeout",
 				Message: "processing exceeded timeout limit",
+				Proxy:   &px,
 			})
 		}
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(ErrorResponse{
 			Error:   "download_failed",
 			Message: err.Error(),
+			Proxy:   &px,
 		})
 	}
 	defer func() { _ = os.Remove(audioPath) }()
@@ -114,11 +119,13 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
 				Error:   "timeout",
 				Message: "processing exceeded timeout limit",
+				Proxy:   &px,
 			})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Error:   "transcription_failed",
 			Message: err.Error(),
+			Proxy:   &px,
 		})
 	}
 
@@ -128,9 +135,14 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 				Error:   "internal_error",
 				Message: "unexpected result type from transcription",
+				Proxy:   &px,
 			})
 		}
-		return c.JSON(TranscribeSegmentsResponse{Segments: segs, DurationSeconds: duration})
+		return c.JSON(fiber.Map{
+			"segments":         segs,
+			"duration_seconds": duration,
+			"proxy":            px,
+		})
 	}
 
 	text, ok := result.(string)
@@ -138,7 +150,13 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Error:   "internal_error",
 			Message: "unexpected result type from transcription",
+			Proxy:   &px,
 		})
 	}
-	return c.JSON(TranscribeTextResponse{Transcript: text, DurationSeconds: duration})
+	// fiber.Map keeps "proxy" in the JSON payload reliably across encoders / clients.
+	return c.JSON(fiber.Map{
+		"transcript":        text,
+		"duration_seconds": duration,
+		"proxy":            px,
+	})
 }

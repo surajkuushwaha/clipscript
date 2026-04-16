@@ -17,18 +17,21 @@ type Segment struct {
 
 // TranscribeTextResponse is returned when format="text".
 type TranscribeTextResponse struct {
-	Transcript      string  `json:"transcript"`
-	DurationSeconds float64 `json:"duration_seconds"`
+	Transcript      string    `json:"transcript"`
+	DurationSeconds float64   `json:"duration_seconds"`
+	Proxy           ProxyInfo `json:"proxy"`
 }
 
 // TranscribeSegmentsResponse is returned when format="segments".
 type TranscribeSegmentsResponse struct {
 	Segments        []Segment `json:"segments"`
 	DurationSeconds float64   `json:"duration_seconds"`
+	Proxy           ProxyInfo `json:"proxy"`
 }
 
 // ErrorResponse is returned on all error paths.
 type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
+	Error   string     `json:"error"`
+	Message string     `json:"message"`
+	Proxy   *ProxyInfo `json:"proxy,omitempty"`
 }

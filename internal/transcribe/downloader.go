@@ -36,6 +36,10 @@ func DownloadAudio(ctx context.Context, url, proxyURL string) (string, error) {
 		dl = dl.Proxy(proxyURL)
 	}
 
+	if truthyEnv("YTDLP_NO_CHECK_CERTIFICATES") {
+		dl = dl.NoCheckCertificates()
+	}
+
 	if _, err := dl.Run(ctx, url); err != nil {
 		_ = os.Remove(finalPath)
 		return "", fmt.Errorf("yt-dlp: %w", err)
@@ -47,4 +51,9 @@ func DownloadAudio(ctx context.Context, url, proxyURL string) (string, error) {
 	}
 
 	return finalPath, nil
+}
+
+func truthyEnv(key string) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	return v == "1" || v == "true" || v == "yes"
 }

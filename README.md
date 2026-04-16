@@ -28,7 +28,7 @@ No Python. No shared filesystem. Audio uploaded directly via multipart to go-whi
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings (PROXY_PROVIDER, SCRAPER_API_KEY, etc.)
+# Edit .env with your settings
 
 docker compose up --build
 ```
@@ -114,9 +114,18 @@ Content-Type: application/json
 ```json
 {
   "transcript": "Hello world this is my video...",
-  "duration_seconds": 47.2
+  "duration_seconds": 47.2,
+  "proxy": {
+    "used": true,
+    "status": "in_use",
+    "source": "pool_embedded",
+    "endpoint": "31.59.20.176:6754",
+    "pool_selection": "round_robin"
+  }
 }
 ```
+
+`proxy` is always present. `status` is `not_used` (direct download) or `in_use`. `source` is `none`, `pool_file`, or `pool_inline`. `endpoint` is the proxy host and port only (no credentials).
 
 **Response (format=segments):**
 ```json
@@ -125,9 +134,16 @@ Content-Type: application/json
     { "start": 0.0, "end": 3.4, "text": "Hello world" },
     { "start": 3.4, "end": 7.1, "text": "this is my video" }
   ],
-  "duration_seconds": 47.2
+  "duration_seconds": 47.2,
+  "proxy": {
+    "used": false,
+    "status": "not_used",
+    "source": "none"
+  }
 }
 ```
+
+`proxy.status` is always `"in_use"` or `"not_used"` so clients do not need to infer from `used` alone.
 
 **Error response:**
 ```json
@@ -150,30 +166,41 @@ All config via environment variables (copy `.env.example` to `.env`):
 | `PORT`            | `8080`                    | Go API port                                          |
 | `GOWHISPER_URL`   | `http://localhost:8081`   | go-whisper server address                            |
 | `REQUEST_TIMEOUT` | `120`                     | Max seconds for full pipeline (download + transcription) |
-| `WHISPER_MODEL`   | `ggml-base.bin`           | Model ID (must be pre-downloaded in go-whisper)      |
-| `PROXY_PROVIDER`  | `none`                    | Proxy: `none` or `scraperapi`                        |
-| `SCRAPER_API_KEY` | —                         | Required when `PROXY_PROVIDER=scraperapi`            |
+| `WHISPER_MODEL`   | `ggml-base`               | Model ID (must be pre-downloaded in go-whisper)      |
+| `PROXY_POOL_FILE` | —                         | Path to JSON proxy pool (highest precedence) |
+| `PROXY_POOL`      | —                         | Inline JSON proxy pool |
+| `YTDLP_NO_CHECK_CERTIFICATES` | —               | Set `true` / `1` for local dev if yt-dlp fails with `CERTIFICATE_VERIFY_FAILED` (insecure; fix CA bundle instead when possible) |
 | `OPENAI_API_KEY`  | —                         | Optional — routes transcription through OpenAI API; set `WHISPER_MODEL=whisper-1` |
 
 ### Whisper model trade-offs
 
-| Model              | Size   | Speed  | Accuracy |
-|--------------------|--------|--------|----------|
-| `ggml-tiny.bin`    | ~75MB  | fast   | low      |
-| `ggml-base.bin`    | ~145MB | fast   | good     |
-| `ggml-small.bin`   | ~465MB | medium | better   |
-| `ggml-medium.bin`  | ~1.5GB | slow   | best     |
+| Model         | Size   | Speed  | Accuracy |
+|---------------|--------|--------|----------|
+| `ggml-tiny`   | ~75MB  | fast   | low      |
+| `ggml-base`   | ~145MB | fast   | good     |
+| `ggml-small`  | ~465MB | medium | better   |
+| `ggml-medium` | ~1.5GB | slow   | best     |
 
 Download a model:
 ```bash
 curl -X POST http://localhost:8081/api/whisper/model \
   -H "Content-Type: application/json" \
-  -d '{"model": "ggml-small.bin"}'
+  -d '{"model": "ggml-small"}'
 ```
 
 ### Proxy support
 
-Set `PROXY_PROVIDER=scraperapi` and add your `SCRAPER_API_KEY` to route yt-dlp through [ScraperAPI](https://www.scraperapi.com/). The proxy layer is designed to be swappable — see `internal/transcribe/proxy.go`.
+Set `PROXY_POOL_FILE` to a JSON file (or put the same JSON in `PROXY_POOL`). Precedence: `PROXY_POOL_FILE` → `PROXY_POOL` → no proxy. See `config/proxy-pool.example.json` and `internal/transcribe/proxy_pool.go`.
+
+An HTTP proxy does not fix TLS verification errors from yt-dlp’s Python runtime: HTTPS to YouTube is still checked against your machine’s CA store. If you see `CERTIFICATE_VERIFY_FAILED`, install/link certificates for your Python (e.g. macOS “Install Certificates.command”), or use `YTDLP_NO_CHECK_CERTIFICATES` only as a temporary local workaround.
+
+### Troubleshooting: `transcription_failed` / OpenAI TLS
+
+If the error mentions **`tls: protocol version not supported`** on the call to `https://api.openai.com/v1/audio/transcriptions`, that failure happens inside the **go-whisper** container (clipscript only forwards audio to it). Try:
+
+1. **Refresh the image** — `docker compose pull whisper && docker compose up -d --force-recreate whisper`
+2. **Use a local model instead of OpenAI** — In `.env`: set `WHISPER_MODEL=ggml-base.bin` (or another GGML id), **remove or empty `OPENAI_API_KEY`** for the whisper service, then download the model onto the `whisper-models` volume (see model download `curl` in this README). Transcription then stays inside the container with no HTTPS to OpenAI.
+3. **Network** — Corporate TLS inspection or restrictive firewalls can break TLS to OpenAI; test from another network or VPN.
 
 ## Development
 

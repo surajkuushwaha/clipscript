@@ -36,18 +36,19 @@ Client
 
 **Transcription routing** (in `internal/transcribe/whisper.go`):
 
-| `OPENAI_API_KEY` | `language` field | Backend |
-|---|---|---|
-| set | empty | OpenAI `/v1/audio/translations` directly (English output) |
-| set | provided | go-whisper → OpenAI `/v1/audio/transcriptions` with language hint |
-| not set | empty | go-whisper `/api/whisper/translate` (local model, English) |
-| not set | provided | go-whisper `/api/whisper/transcribe` with language hint |
+| `OPENAI_API_KEY` | `language` field | Backend                                                           |
+| ---------------- | ---------------- | ----------------------------------------------------------------- |
+| set              | empty            | OpenAI `/v1/audio/translations` directly (English output)         |
+| set              | provided         | go-whisper → OpenAI `/v1/audio/transcriptions` with language hint |
+| not set          | empty            | go-whisper `/api/whisper/translate` (local model, English)        |
+| not set          | provided         | go-whisper `/api/whisper/transcribe` with language hint           |
 
 The `language` field is a **source** language hint (what language the audio is in), not an output language selector. Omitting it triggers the translate endpoint → always English output.
 
 ## Key packages
 
 **`internal/transcribe/`** — all transcription logic:
+
 - `models.go` — request/response structs (`TranscribeRequest`, `Segment`, etc.)
 - `validator.go` — URL regex for Instagram Reels + YouTube Shorts; strips query strings before matching
 - `proxy.go` — `ProxyProvider` interface; add new providers by implementing the interface + a `case` in `NewProxyProvider()`
@@ -74,15 +75,15 @@ Fiber test requests require `req.Host = "localhost"` or the test will fail with 
 
 ## Environment variables
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `PORT` | `8080` | Go API port |
-| `GOWHISPER_URL` | `http://localhost:8081` | go-whisper sidecar |
-| `REQUEST_TIMEOUT` | `120` | Full pipeline timeout (seconds) |
-| `WHISPER_MODEL` | `ggml-base.bin` | Model ID; use `whisper-1` with OpenAI |
-| `PROXY_PROVIDER` | `none` | `none` or `scraperapi` |
-| `SCRAPER_API_KEY` | — | Required when `PROXY_PROVIDER=scraperapi` |
-| `OPENAI_API_KEY` | — | When set, translate calls OpenAI directly |
+| Variable          | Default                 | Purpose                                   |
+| ----------------- | ----------------------- | ----------------------------------------- |
+| `PORT`            | `8080`                  | Go API port                               |
+| `GOWHISPER_URL`   | `http://localhost:8081` | go-whisper sidecar                        |
+| `REQUEST_TIMEOUT` | `120`                   | Full pipeline timeout (seconds)           |
+| `WHISPER_MODEL`   | `ggml-base.bin`         | Model ID; use `whisper-1` with OpenAI     |
+| `PROXY_PROVIDER`  | `none`                  | `none` or `scraperapi`                    |
+| `SCRAPER_API_KEY` | —                       | Required when `PROXY_PROVIDER=scraperapi` |
+| `OPENAI_API_KEY`  | —                       | When set, translate calls OpenAI directly |
 
 Copy `.env.example` → `.env` to get started.
 

@@ -1,7 +1,6 @@
 package transcribe_test
 
 import (
-	"strings"
 	"testing"
 
 	"clipscript/internal/transcribe"
@@ -14,28 +13,11 @@ func TestNoProxy(t *testing.T) {
 	}
 }
 
-func TestScraperAPIProxy(t *testing.T) {
-	p := transcribe.ScraperAPIProxy{APIKey: "testkey123"}
-	got := p.ProxyURL()
-	want := "http://scraperapi:testkey123@proxy-server.scraperapi.com:8001"
-	if got != want {
-		t.Errorf("ScraperAPIProxy.ProxyURL() = %q, want %q", got, want)
-	}
-}
-
-func TestNewProxyProvider_None(t *testing.T) {
-	t.Setenv("PROXY_PROVIDER", "none")
+func TestNewProxyProvider_NoPool(t *testing.T) {
+	t.Setenv("PROXY_POOL", "")
+	t.Setenv("PROXY_POOL_FILE", "")
 	p := transcribe.NewProxyProvider()
 	if p.ProxyURL() != "" {
-		t.Errorf("expected empty proxy URL for provider=none")
-	}
-}
-
-func TestNewProxyProvider_ScraperAPI(t *testing.T) {
-	t.Setenv("PROXY_PROVIDER", "scraperapi")
-	t.Setenv("SCRAPER_API_KEY", "mykey")
-	p := transcribe.NewProxyProvider()
-	if got := p.ProxyURL(); !strings.Contains(got, "mykey") {
-		t.Errorf("expected proxy URL to contain API key, got %q", got)
+		t.Errorf("expected empty proxy URL when no pool configured")
 	}
 }
