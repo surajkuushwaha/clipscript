@@ -19,6 +19,7 @@ func TestHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating request. Err: %v", err)
 	}
+	req.Host = "localhost"
 	// Perform the request
 	resp, err := app.Test(req)
 	if err != nil {

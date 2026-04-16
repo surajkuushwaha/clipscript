@@ -23,6 +23,21 @@ clean:
 	@echo "Cleaning..."
 	@rm -f main
 
+# Start whisper sidecar + Go API with live reload
+dev:
+	@docker compose up -d whisper
+	@AIR=$$(command -v air || echo "$$HOME/go/bin/air"); \
+	if ! command -v air > /dev/null && [ ! -f "$$HOME/go/bin/air" ]; then \
+		read -p "Go's 'air' is not installed on your machine. Do you want to install it? [Y/n] " choice; \
+		if [ "$$choice" != "n" ] && [ "$$choice" != "N" ]; then \
+			go install github.com/air-verse/air@latest; \
+		else \
+			echo "You chose not to install air. Exiting..."; \
+			exit 1; \
+		fi; \
+	fi; \
+	"$$HOME/go/bin/air"
+
 # Live Reload
 watch:
 	@if command -v air > /dev/null; then \
@@ -40,4 +55,4 @@ watch:
             fi; \
         fi
 
-.PHONY: all build run test clean watch
+.PHONY: all build run dev test clean watch
