@@ -25,6 +25,9 @@ tmp/
 # .env file
 .env
 
+# Generated proxy credentials (from cmd/webshare-proxy-pool)
+config/proxy-pool.json
+
 # Project build
 main
 *templ.go

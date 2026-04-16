@@ -1,0 +1,34 @@
+services:
+  whisper:
+    image: ghcr.io/mutablelogic/go-whisper:latest
+    command: run
+    ports:
+      - "8081:8081"
+    volumes:
+      - whisper-models:/data
+    environment:
+      # OpenAI: go-whisper POSTs to https://api.openai.com from this container.
+      # If you see "tls: protocol version not supported" on transcribe, pull a newer image
+      # (`docker compose pull whisper`) or use a local GGML model instead (omit key, WHISPER_MODEL=ggml-base.bin).
+      # When set, use WHISPER_MODEL=whisper-1 in .env
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    restart: unless-stopped
+
+  api:
+    profiles:
+      - full
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      # Override so api container reaches whisper by service name
+      GOWHISPER_URL: http://whisper:8081
+      PROXY_POOL_FILE: ""
+    depends_on:
+      - whisper
+    restart: unless-stopped
+
+volumes:
+  whisper-models:

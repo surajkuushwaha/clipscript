@@ -1,28 +1,27 @@
 package server
 
 import (
+	"clipscript/internal/transcribe"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 )
 
 func (s *FiberServer) RegisterFiberRoutes() {
-	// Apply CORS middleware
 	s.App.Use(cors.New(cors.Config{
 		AllowOrigins:     "*",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
 		AllowHeaders:     "Accept,Authorization,Content-Type",
-		AllowCredentials: false, // credentials require explicit origins
+		AllowCredentials: false,
 		MaxAge:           300,
 	}))
 
 	s.App.Get("/", s.HelloWorldHandler)
 
+	h := transcribe.NewHandler()
+	s.App.Post("/v1/transcribe", h.Transcribe)
 }
 
 func (s *FiberServer) HelloWorldHandler(c *fiber.Ctx) error {
-	resp := fiber.Map{
-		"message": "Hello World",
-	}
-
-	return c.JSON(resp)
+	return c.JSON(fiber.Map{"message": "Hello World"})
 }
