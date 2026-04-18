@@ -28,10 +28,10 @@ Two-process system: a **Go Fiber API** (`:8080`) and a **go-whisper Docker conta
 
 ```
 Client
-  → POST /v1/transcribe
-  → Go API: validate URL, optional disk cache (see CACHE_*), download audio (go-ytdlp → temp or ./cache/audio/…)
+  → POST /v1/transcribe (body: `urls` array, shared `format` / `language`)
+  → Go API: for each URL — validate, optional disk cache (see CACHE_*), download audio (go-ytdlp → temp or ./cache/audio/…)
   → Transcription backend (see routing below)
-  → JSON response (includes `cached`: `none` | `transcript` | `audio`)
+  → JSON batch response: `results[]` per URL (`ok`, `cached`, transcript/segments or `error`), top-level `proxy`
 ```
 
 **Transcription routing** (in `internal/transcribe/whisper.go`):
@@ -49,7 +49,7 @@ The `language` field is a **source** language hint (what language the audio is i
 
 **`internal/transcribe/`** — all transcription logic:
 
-- `models.go` — request/response structs (`TranscribeRequest`, `Segment`, etc.)
+- `models.go` — `TranscribeRequest` (`urls` only), `TranscribeBatchResponse` / `TranscribeItemResult`, `Segment`, etc.
 - `validator.go` — `ValidateURL` / `ParseURL` (platform `ig`|`yt` + shortcode); strips query strings before matching
 - `proxy.go` — `ProxyProvider` interface; add new providers by implementing the interface + a `case` in `NewProxyProvider()`
 - `cache.go` — optional on-disk cache (`CACHE_ENABLED`, `CACHE_DIR`); audio `ig_<id>.mp3` / `yt_<id>.mp3`, transcripts JSON keyed by shortcode + language + format
@@ -73,6 +73,8 @@ h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{},
 `downloadFn`: `(ctx, url, proxyURL, destPath string) error`. `TranscribeAudio` signature: `(ctx, goWhisperURL, model, audioPath, format, language, openAIKey string)` — 7 string params after ctx.
 
 Fiber test requests require `req.Host = "localhost"` or the test will fail with "missing required Host header".
+
+Successful responses decode as `TranscribeBatchResponse` (`results` + `proxy`). Request bodies use `urls` only, not `url`.
 
 ## Environment variables
 

@@ -2,6 +2,7 @@ package transcribe
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
@@ -84,40 +85,20 @@ func tempMP3Path() (string, error) {
 	return strings.TrimSuffix(tmpPath, filepath.Ext(tmpPath)) + ".mp3", nil
 }
 
-// Transcribe handles POST /v1/transcribe.
-func (h *Handler) Transcribe(c *fiber.Ctx) error {
-	var req TranscribeRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "invalid_request",
-			Message: "request body must be valid JSON with a 'url' field",
-		})
+func (h *Handler) transcribeOne(ctx context.Context, reqURL, format, language string) TranscribeItemResult {
+	item := TranscribeItemResult{URL: reqURL, Ok: false}
+
+	if err := ValidateURL(reqURL); err != nil {
+		item.Error = "invalid_url"
+		item.Message = err.Error()
+		return item
 	}
 
-	if req.Format == "" {
-		req.Format = "text"
-	}
-
-	if req.Format != "text" && req.Format != "segments" {
-		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "invalid_format",
-			Message: "format must be 'text' or 'segments'",
-		})
-	}
-
-	if err := ValidateURL(req.URL); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "invalid_url",
-			Message: err.Error(),
-		})
-	}
-
-	platform, shortcode, err := ParseURL(req.URL)
+	platform, shortcode, err := ParseURL(reqURL)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "invalid_url",
-			Message: err.Error(),
-		})
+		item.Error = "invalid_url"
+		item.Message = err.Error()
+		return item
 	}
 
 	cache := h.Cache
@@ -125,33 +106,22 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 		cache = NewCache()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), h.RequestTimeout)
-	defer cancel()
-
 	usedProxy := h.Proxy.ProxyURL()
-	px := describeProxy(h.Proxy, usedProxy)
 
-	if ct, hit, err := cache.ReadTranscript(platform, shortcode, req.Language, req.Format); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "internal_error",
-			Message: err.Error(),
-			Proxy:   &px,
-		})
+	if ct, hit, err := cache.ReadTranscript(platform, shortcode, language, format); err != nil {
+		item.Error = "internal_error"
+		item.Message = err.Error()
+		return item
 	} else if hit {
-		if req.Format == "segments" {
-			return c.JSON(fiber.Map{
-				"segments":         ct.Segments,
-				"duration_seconds": ct.Duration,
-				"proxy":            px,
-				"cached":           "transcript",
-			})
+		item.Ok = true
+		item.Cached = "transcript"
+		item.DurationSeconds = ct.Duration
+		if format == "segments" {
+			item.Segments = ct.Segments
+		} else {
+			item.Transcript = ct.Text
 		}
-		return c.JSON(fiber.Map{
-			"transcript":       ct.Text,
-			"duration_seconds": ct.Duration,
-			"proxy":            px,
-			"cached":           "transcript",
-		})
+		return item
 	}
 
 	var audioPath string
@@ -168,31 +138,25 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 		} else {
 			ap, err := tempMP3Path()
 			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-					Error:   "internal_error",
-					Message: err.Error(),
-					Proxy:   &px,
-				})
+				item.Error = "internal_error"
+				item.Message = err.Error()
+				return item
 			}
 			audioPath = ap
 			removeAfter = true
 		}
-		if err := h.downloadFn(ctx, req.URL, usedProxy, audioPath); err != nil {
+		if err := h.downloadFn(ctx, reqURL, usedProxy, audioPath); err != nil {
 			if removeAfter {
 				_ = os.Remove(audioPath)
 			}
 			if isTimeout(err) {
-				return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
-					Error:   "timeout",
-					Message: "processing exceeded timeout limit",
-					Proxy:   &px,
-				})
+				item.Error = "timeout"
+				item.Message = "processing exceeded timeout limit"
+				return item
 			}
-			return c.Status(fiber.StatusUnprocessableEntity).JSON(ErrorResponse{
-				Error:   "download_failed",
-				Message: err.Error(),
-				Proxy:   &px,
-			})
+			item.Error = "download_failed"
+			item.Message = err.Error()
+			return item
 		}
 	}
 
@@ -200,57 +164,114 @@ func (h *Handler) Transcribe(c *fiber.Ctx) error {
 		defer func() { _ = os.Remove(audioPath) }()
 	}
 
-	result, duration, err := h.transcribeFn(ctx, h.GoWhisperURL, h.WhisperModel, audioPath, req.Format, req.Language, h.OpenAIKey)
+	result, duration, err := h.transcribeFn(ctx, h.GoWhisperURL, h.WhisperModel, audioPath, format, language, h.OpenAIKey)
 	if err != nil {
 		if isTimeout(err) {
-			return c.Status(fiber.StatusRequestTimeout).JSON(ErrorResponse{
-				Error:   "timeout",
-				Message: "processing exceeded timeout limit",
-				Proxy:   &px,
-			})
+			item.Error = "timeout"
+			item.Message = "processing exceeded timeout limit"
+			return item
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "transcription_failed",
-			Message: err.Error(),
-			Proxy:   &px,
-		})
+		item.Error = "transcription_failed"
+		item.Message = err.Error()
+		return item
 	}
 
-	if req.Format == "segments" {
+	if format == "segments" {
 		segs, ok := result.([]Segment)
 		if !ok {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Error:   "internal_error",
-				Message: "unexpected result type from transcription",
-				Proxy:   &px,
-			})
+			item.Error = "internal_error"
+			item.Message = "unexpected result type from transcription"
+			return item
 		}
-		if err := cache.WriteTranscript(platform, shortcode, req.Language, req.Format, segs, duration); err != nil {
+		if err := cache.WriteTranscript(platform, shortcode, language, format, segs, duration); err != nil {
 			log.Printf("clipscript: cache write transcript: %v", err)
 		}
-		return c.JSON(fiber.Map{
-			"segments":         segs,
-			"duration_seconds": duration,
-			"proxy":            px,
-			"cached":           cachedTag,
-		})
+		item.Ok = true
+		item.Segments = segs
+		item.DurationSeconds = duration
+		item.Cached = cachedTag
+		return item
 	}
 
 	text, ok := result.(string)
 	if !ok {
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "internal_error",
-			Message: "unexpected result type from transcription",
-			Proxy:   &px,
-		})
+		item.Error = "internal_error"
+		item.Message = "unexpected result type from transcription"
+		return item
 	}
-	if err := cache.WriteTranscript(platform, shortcode, req.Language, req.Format, text, duration); err != nil {
+	if err := cache.WriteTranscript(platform, shortcode, language, format, text, duration); err != nil {
 		log.Printf("clipscript: cache write transcript: %v", err)
 	}
-	return c.JSON(fiber.Map{
-		"transcript":        text,
-		"duration_seconds": duration,
-		"proxy":             px,
-		"cached":            cachedTag,
+	item.Ok = true
+	item.Transcript = text
+	item.DurationSeconds = duration
+	item.Cached = cachedTag
+	return item
+}
+
+// Transcribe handles POST /v1/transcribe (batch: `urls` array only).
+func (h *Handler) Transcribe(c *fiber.Ctx) error {
+	body := c.Body()
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "invalid_request",
+			Message: "request body must be non-empty JSON",
+		})
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "invalid_request",
+			Message: "request body must be valid JSON",
+		})
+	}
+	if _, hasURL := raw["url"]; hasURL {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "deprecated_field",
+			Message: "use 'urls' array instead of 'url'",
+		})
+	}
+
+	var req TranscribeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "invalid_request",
+			Message: "request body must be valid JSON",
+		})
+	}
+
+	if len(req.URLs) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "invalid_request",
+			Message: "urls must be a non-empty array",
+		})
+	}
+
+	if req.Format == "" {
+		req.Format = "text"
+	}
+
+	if req.Format != "text" && req.Format != "segments" {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "invalid_format",
+			Message: "format must be 'text' or 'segments'",
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), h.RequestTimeout)
+	defer cancel()
+
+	usedProxy := h.Proxy.ProxyURL()
+	px := describeProxy(h.Proxy, usedProxy)
+
+	results := make([]TranscribeItemResult, 0, len(req.URLs))
+	for _, u := range req.URLs {
+		results = append(results, h.transcribeOne(ctx, u, req.Format, req.Language))
+	}
+
+	return c.JSON(TranscribeBatchResponse{
+		Results: results,
+		Proxy:   px,
 	})
 }
