@@ -115,6 +115,7 @@ Content-Type: application/json
 {
   "transcript": "Hello world this is my video...",
   "duration_seconds": 47.2,
+  "cached": "none",
   "proxy": {
     "used": true,
     "status": "in_use",
@@ -124,6 +125,8 @@ Content-Type: application/json
   }
 }
 ```
+
+`cached` is `none` (fresh pipeline), `audio` (reused downloaded mp3), or `transcript` (full cache hit). Enable persistence with `CACHE_ENABLED=true` and optional `CACHE_DIR` (default `./cache`); see `.env.example`.
 
 `proxy` is always present. `status` is `not_used` (direct download) or `in_use`. `source` is `none`, `pool_file`, or `pool_inline`. `endpoint` is the proxy host and port only (no credentials).
 

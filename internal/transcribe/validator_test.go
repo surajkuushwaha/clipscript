@@ -45,3 +45,29 @@ func TestValidateURL(t *testing.T) {
 		}
 	}
 }
+
+func TestParseURL(t *testing.T) {
+	cases := []struct {
+		rawURL   string
+		platform string
+		code     string
+	}{
+		{"https://www.instagram.com/reel/ABC123/", "ig", "ABC123"},
+		{"https://www.instagram.com/thedigital.indian/reel/Xy_-Z9/", "ig", "Xy_-Z9"},
+		{"https://www.instagram.com/share/reel/SHARE99/", "ig", "SHARE99"},
+		{"https://www.youtube.com/shorts/dQw4w9WgXcQ", "yt", "dQw4w9WgXcQ"},
+		{"https://youtube.com/shorts/abc?feature=share", "yt", "abc"},
+	}
+	for _, tc := range cases {
+		p, code, err := transcribe.ParseURL(tc.rawURL)
+		if err != nil {
+			t.Fatalf("ParseURL(%q): %v", tc.rawURL, err)
+		}
+		if p != tc.platform || code != tc.code {
+			t.Errorf("ParseURL(%q) = (%q, %q), want (%q, %q)", tc.rawURL, p, code, tc.platform, tc.code)
+		}
+	}
+	if _, _, err := transcribe.ParseURL("https://www.tiktok.com/x"); err == nil {
+		t.Fatal("expected error for unsupported URL")
+	}
+}

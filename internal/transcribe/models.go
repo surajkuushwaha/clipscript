@@ -20,6 +20,7 @@ type TranscribeTextResponse struct {
 	Transcript      string    `json:"transcript"`
 	DurationSeconds float64   `json:"duration_seconds"`
 	Proxy           ProxyInfo `json:"proxy"`
+	Cached          string    `json:"cached"` // "none" | "transcript" | "audio"
 }
 
 // TranscribeSegmentsResponse is returned when format="segments".
@@ -27,6 +28,7 @@ type TranscribeSegmentsResponse struct {
 	Segments        []Segment `json:"segments"`
 	DurationSeconds float64   `json:"duration_seconds"`
 	Proxy           ProxyInfo `json:"proxy"`
+	Cached          string    `json:"cached"` // "none" | "transcript" | "audio"
 }
 
 // ErrorResponse is returned on all error paths.

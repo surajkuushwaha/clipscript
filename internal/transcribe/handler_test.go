@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,10 +30,11 @@ func newHandler(t *testing.T) *transcribe.Handler {
 	t.Setenv("PROXY_POOL", "")
 	t.Setenv("PROXY_POOL_FILE", "")
 	t.Setenv("USE_EMBEDDED_PROXY_POOL", "")
+	t.Setenv("CACHE_ENABLED", "false")
 	h := transcribe.NewHandler()
 	// Default stubs — each test overrides what it needs.
-	h.SetDownloadFn(func(_ context.Context, _, _ string) (string, error) {
-		return "/tmp/fake-audio.mp3", nil
+	h.SetDownloadFn(func(_ context.Context, _, _, _ string) error {
+		return nil
 	})
 	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
 		return "hello world", 12.5, nil
@@ -119,8 +122,8 @@ func TestTranscribe_InvalidFormat(t *testing.T) {
 
 func TestTranscribe_DownloadFailed(t *testing.T) {
 	h := newHandler(t)
-	h.SetDownloadFn(func(_ context.Context, _, _ string) (string, error) {
-		return "", errors.New("network error")
+	h.SetDownloadFn(func(_ context.Context, _, _, _ string) error {
+		return errors.New("network error")
 	})
 	app := newTestApp(h)
 
@@ -142,8 +145,8 @@ func TestTranscribe_DownloadFailed(t *testing.T) {
 
 func TestTranscribe_DownloadTimeout(t *testing.T) {
 	h := newHandler(t)
-	h.SetDownloadFn(func(_ context.Context, _, _ string) (string, error) {
-		return "", context.DeadlineExceeded
+	h.SetDownloadFn(func(_ context.Context, _, _, _ string) error {
+		return context.DeadlineExceeded
 	})
 	app := newTestApp(h)
 
@@ -218,6 +221,9 @@ func TestTranscribe_TextSuccess(t *testing.T) {
 	if result.Proxy.Status != transcribe.ProxyStatusNotUsed {
 		t.Errorf("expected proxy.status=not_used, got %q", result.Proxy.Status)
 	}
+	if result.Cached != "none" {
+		t.Errorf("expected cached=none, got %q", result.Cached)
+	}
 }
 
 func TestTranscribe_SuccessBodyIncludesProxyKey(t *testing.T) {
@@ -237,6 +243,9 @@ func TestTranscribe_SuccessBodyIncludesProxyKey(t *testing.T) {
 	}
 	if !bytes.Contains(raw, []byte(`"proxy"`)) || !bytes.Contains(raw, []byte(`"not_used"`)) {
 		t.Fatalf("expected JSON to include proxy + not_used, got: %s", raw)
+	}
+	if !bytes.Contains(raw, []byte(`"cached"`)) {
+		t.Fatalf("expected JSON to include cached, got: %s", raw)
 	}
 }
 
@@ -272,6 +281,9 @@ func TestTranscribe_SegmentsSuccess(t *testing.T) {
 	if result.DurationSeconds != 3.4 {
 		t.Errorf("expected duration_seconds=3.4, got %f", result.DurationSeconds)
 	}
+	if result.Cached != "none" {
+		t.Errorf("expected cached=none, got %q", result.Cached)
+	}
 }
 
 // ── 9. Default Format ──────────────────────────────────────────────────────────
@@ -305,6 +317,9 @@ func TestTranscribe_DefaultFormat(t *testing.T) {
 	}
 	if result.Transcript != "default text" {
 		t.Errorf("expected transcript=default text, got %q", result.Transcript)
+	}
+	if result.Cached != "none" {
+		t.Errorf("expected cached=none, got %q", result.Cached)
 	}
 }
 
@@ -361,6 +376,9 @@ func TestTranscribe_DefaultLanguageTranslates(t *testing.T) {
 	if result.Transcript != "translated english text" {
 		t.Errorf("expected translated english text, got %q", result.Transcript)
 	}
+	if result.Cached != "none" {
+		t.Errorf("expected cached=none, got %q", result.Cached)
+	}
 }
 
 // ── 12. With language → transcribe endpoint ────────────────────────────────────
@@ -391,5 +409,205 @@ func TestTranscribe_WithLanguageTranscribes(t *testing.T) {
 	}
 	if result.Transcript != "हिन्दी text" {
 		t.Errorf("expected हिन्दी text, got %q", result.Transcript)
+	}
+	if result.Cached != "none" {
+		t.Errorf("expected cached=none, got %q", result.Cached)
+	}
+}
+
+// ── 13. Cache: cold (enabled) ─────────────────────────────────────────────────
+
+func TestTranscribe_CacheColdWritesFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CACHE_ENABLED", "true")
+	t.Setenv("CACHE_DIR", dir)
+	t.Setenv("PROXY_POOL", "")
+	t.Setenv("PROXY_POOL_FILE", "")
+	t.Setenv("USE_EMBEDDED_PROXY_POOL", "")
+
+	var dlCalls int
+	h := transcribe.NewHandler()
+	h.SetDownloadFn(func(_ context.Context, _, _, dest string) error {
+		dlCalls++
+		return os.WriteFile(dest, []byte("fake"), 0o644)
+	})
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
+		return "hello", 2.0, nil
+	})
+	app := newTestApp(h)
+
+	resp, err := doRequest(app, `{"url":"https://www.youtube.com/shorts/abc123xyz","format":"text"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if dlCalls != 1 {
+		t.Fatalf("expected 1 download, got %d", dlCalls)
+	}
+	var result transcribe.TranscribeTextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Cached != "none" {
+		t.Errorf("expected cached=none, got %q", result.Cached)
+	}
+	audioPath := filepath.Join(dir, "audio", "yt_abc123xyz.mp3")
+	if _, err := os.Stat(audioPath); err != nil {
+		t.Fatalf("expected audio file at %s: %v", audioPath, err)
+	}
+	trPath := filepath.Join(dir, "transcripts", "yt_abc123xyz__auto__text.json")
+	if _, err := os.Stat(trPath); err != nil {
+		t.Fatalf("expected transcript file at %s: %v", trPath, err)
+	}
+}
+
+// ── 14. Cache: audio hit skips download ────────────────────────────────────────
+
+func TestTranscribe_CacheAudioHitSkipsDownload(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CACHE_ENABLED", "true")
+	t.Setenv("CACHE_DIR", dir)
+	t.Setenv("PROXY_POOL", "")
+	t.Setenv("PROXY_POOL_FILE", "")
+	t.Setenv("USE_EMBEDDED_PROXY_POOL", "")
+
+	h := transcribe.NewHandler()
+	_ = os.MkdirAll(filepath.Join(dir, "audio"), 0o755)
+	audioPath := filepath.Join(dir, "audio", "yt_vid123.mp3")
+	if err := os.WriteFile(audioPath, []byte("cached-audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var dlCalls int
+	h.SetDownloadFn(func(_ context.Context, _, _, _ string) error {
+		dlCalls++
+		return nil
+	})
+	var trCalls int
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
+		trCalls++
+		return "second lang", 3.0, nil
+	})
+	app := newTestApp(h)
+
+	resp, err := doRequest(app, `{"url":"https://www.youtube.com/shorts/vid123","format":"text","language":"hi"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if dlCalls != 0 {
+		t.Fatalf("expected download skipped, got %d calls", dlCalls)
+	}
+	if trCalls != 1 {
+		t.Fatalf("expected transcribe once, got %d", trCalls)
+	}
+	var result transcribe.TranscribeTextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Cached != "audio" {
+		t.Errorf("expected cached=audio, got %q", result.Cached)
+	}
+}
+
+// ── 15. Cache: transcript hit skips pipeline ─────────────────────────────────
+
+func TestTranscribe_CacheTranscriptHit(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CACHE_ENABLED", "true")
+	t.Setenv("CACHE_DIR", dir)
+	t.Setenv("PROXY_POOL", "")
+	t.Setenv("PROXY_POOL_FILE", "")
+	t.Setenv("USE_EMBEDDED_PROXY_POOL", "")
+
+	h := transcribe.NewHandler()
+	_ = os.MkdirAll(filepath.Join(dir, "transcripts"), 0o755)
+	trPath := filepath.Join(dir, "transcripts", "yt_pre123__auto__text.json")
+	payload := `{"format":"text","transcript":"from cache","duration_seconds":9.5}`
+	if err := os.WriteFile(trPath, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var dlCalls, trCalls int
+	h.SetDownloadFn(func(_ context.Context, _, _, _ string) error {
+		dlCalls++
+		return nil
+	})
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
+		trCalls++
+		return "no", 0, nil
+	})
+	app := newTestApp(h)
+
+	resp, err := doRequest(app, `{"url":"https://www.youtube.com/shorts/pre123","format":"text"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if dlCalls != 0 || trCalls != 0 {
+		t.Fatalf("expected no download/transcribe, got dl=%d tr=%d", dlCalls, trCalls)
+	}
+	var result transcribe.TranscribeTextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Transcript != "from cache" || result.DurationSeconds != 9.5 {
+		t.Fatalf("unexpected body: %+v", result)
+	}
+	if result.Cached != "transcript" {
+		t.Errorf("expected cached=transcript, got %q", result.Cached)
+	}
+}
+
+// ── 16. Cache: disabled leaves cache dir empty ────────────────────────────────
+
+func TestTranscribe_CacheDisabledNoFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CACHE_ENABLED", "false")
+	t.Setenv("CACHE_DIR", dir)
+	t.Setenv("PROXY_POOL", "")
+	t.Setenv("PROXY_POOL_FILE", "")
+	t.Setenv("USE_EMBEDDED_PROXY_POOL", "")
+
+	var dlCalls int
+	h := transcribe.NewHandler()
+	h.SetDownloadFn(func(_ context.Context, _, _, dest string) error {
+		dlCalls++
+		return os.WriteFile(dest, []byte("x"), 0o644)
+	})
+	h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
+		return "ok", 1.0, nil
+	})
+	app := newTestApp(h)
+
+	resp, err := doRequest(app, `{"url":"https://www.youtube.com/shorts/nocache99","format":"text"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if dlCalls != 1 {
+		t.Fatalf("expected 1 download, got %d", dlCalls)
+	}
+	var result transcribe.TranscribeTextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Cached != "none" {
+		t.Errorf("expected cached=none, got %q", result.Cached)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected empty cache dir, got %d entries", len(entries))
 	}
 }
