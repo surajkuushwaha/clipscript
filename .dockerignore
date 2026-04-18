@@ -6,3 +6,4 @@ worktrees
 .air.toml
 docs/
 main
+cache/

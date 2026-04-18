@@ -35,3 +35,6 @@ main
 # OS X generated file
 .DS_Store
 
+# Cached audio + transcripts (opt-in via CACHE_ENABLED)
+cache/
+

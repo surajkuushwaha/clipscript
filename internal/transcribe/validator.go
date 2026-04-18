@@ -15,21 +15,31 @@ var (
 	reYouTubeShorts = regexp.MustCompile(`(?i)(?:www\.)?youtube\.com/shorts/([a-zA-Z0-9_\-]+)`)
 )
 
+// ParseURL returns ("ig"|"yt", shortcode, nil) for a supported Instagram Reel or YouTube Shorts URL.
+// Query strings and fragments are stripped before matching.
+func ParseURL(rawURL string) (platform, shortcode string, err error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return "", "", fmt.Errorf("URL must be an Instagram Reel or YouTube Shorts link")
+	}
+
+	pathURL := u.Scheme + "://" + u.Host + u.Path
+
+	if m := reInstagramReel.FindStringSubmatch(pathURL); len(m) >= 2 {
+		return "ig", m[1], nil
+	}
+	if m := reInstagramShare.FindStringSubmatch(pathURL); len(m) >= 2 {
+		return "ig", m[1], nil
+	}
+	if m := reYouTubeShorts.FindStringSubmatch(pathURL); len(m) >= 2 {
+		return "yt", m[1], nil
+	}
+	return "", "", fmt.Errorf("URL must be an Instagram Reel or YouTube Shorts link")
+}
+
 // ValidateURL returns nil if url is a supported Instagram Reel or YouTube Shorts link.
 // Query strings and fragments are stripped before matching.
 func ValidateURL(rawURL string) error {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" {
-		return fmt.Errorf("URL must be an Instagram Reel or YouTube Shorts link")
-	}
-
-	// Match against path only (query string stripped)
-	pathURL := u.Scheme + "://" + u.Host + u.Path
-
-	if reInstagramReel.MatchString(pathURL) ||
-		reInstagramShare.MatchString(pathURL) ||
-		reYouTubeShorts.MatchString(pathURL) {
-		return nil
-	}
-	return fmt.Errorf("URL must be an Instagram Reel or YouTube Shorts link")
+	_, _, err := ParseURL(rawURL)
+	return err
 }
