@@ -28,10 +28,10 @@ Two-process system: a **Go Fiber API** (`:8080`) and a **go-whisper Docker conta
 
 ```
 Client
-  → POST /v1/transcribe
-  → Go API: validate URL, download audio (go-ytdlp → /tmp/<uuid>.mp3)
+  → POST /v1/transcribe (body: `urls` array, shared `format` / `language`)
+  → Go API: for each URL — validate, optional disk cache (see CACHE_*), download audio (go-ytdlp → temp or ./cache/audio/…)
   → Transcription backend (see routing below)
-  → JSON response
+  → JSON batch response: `results[]` per URL (`ok`, `cached`, transcript/segments or `error`), top-level `proxy`
 ```
 
 **Transcription routing** (in `internal/transcribe/whisper.go`):
@@ -49,12 +49,13 @@ The `language` field is a **source** language hint (what language the audio is i
 
 **`internal/transcribe/`** — all transcription logic:
 
-- `models.go` — request/response structs (`TranscribeRequest`, `Segment`, etc.)
-- `validator.go` — URL regex for Instagram Reels + YouTube Shorts; strips query strings before matching
+- `models.go` — `TranscribeRequest` (`urls` only), `TranscribeBatchResponse` / `TranscribeItemResult`, `Segment`, etc.
+- `validator.go` — `ValidateURL` / `ParseURL` (platform `ig`|`yt` + shortcode); strips query strings before matching
 - `proxy.go` — `ProxyProvider` interface; add new providers by implementing the interface + a `case` in `NewProxyProvider()`
-- `downloader.go` — `DownloadAudio()` via go-ytdlp; writes to `/tmp/<uuid>.mp3`; caller defers `os.Remove`
+- `cache.go` — optional on-disk cache (`CACHE_ENABLED`, `CACHE_DIR`); audio `ig_<id>.mp3` / `yt_<id>.mp3`, transcripts JSON keyed by shortcode + language + format
+- `downloader.go` — `DownloadAudio()` (temp mp3) and `DownloadAudioTo(dest)` (atomic `.part` → rename); handler removes temp when cache is off
 - `whisper.go` — `TranscribeAudio()` routes to OpenAI or go-whisper; `transcribeOpenAIDirect()` / `transcribeViaGoWhisper()` are the two implementations
-- `handler.go` — `Handler` struct wires everything; `downloadFn`/`transcribeFn` fields are injectable for tests via `SetDownloadFn`/`SetTranscribeFn`
+- `handler.go` — `Handler` wires cache + `downloadFn`/`transcribeFn`; injectable for tests via `SetDownloadFn`/`SetTranscribeFn`
 
 **`internal/server/`** — Fiber app init and route registration.
 
@@ -63,15 +64,17 @@ The `language` field is a **source** language hint (what language the audio is i
 Handler tests (`handler_test.go`) use injectable function fields — stub both by default in `newHandler()`, override only what each test needs:
 
 ```go
-h := newHandler() // stubs downloadFn + transcribeFn
+h := newHandler() // stubs downloadFn + transcribeFn; CACHE_ENABLED=false
 h.SetTranscribeFn(func(_ context.Context, _, _, _, _, _, _ string) (interface{}, float64, error) {
     return "hello", 12.5, nil
 })
 ```
 
-`TranscribeAudio` signature: `(ctx, goWhisperURL, model, audioPath, format, language, openAIKey string)` — 7 string params after ctx.
+`downloadFn`: `(ctx, url, proxyURL, destPath string) error`. `TranscribeAudio` signature: `(ctx, goWhisperURL, model, audioPath, format, language, openAIKey string)` — 7 string params after ctx.
 
 Fiber test requests require `req.Host = "localhost"` or the test will fail with "missing required Host header".
+
+Successful responses decode as `TranscribeBatchResponse` (`results` + `proxy`). Request bodies use `urls` only, not `url`.
 
 ## Environment variables
 
@@ -84,6 +87,8 @@ Fiber test requests require `req.Host = "localhost"` or the test will fail with 
 | `PROXY_PROVIDER`  | `none`                  | `none` or `scraperapi`                    |
 | `SCRAPER_API_KEY` | —                       | Required when `PROXY_PROVIDER=scraperapi` |
 | `OPENAI_API_KEY`  | —                       | When set, translate calls OpenAI directly |
+| `CACHE_ENABLED`   | `false`                 | `true`/`1`/`yes` to cache audio + transcripts under `CACHE_DIR` |
+| `CACHE_DIR`       | `./cache`               | Cache root (gitignored); ignored when `CACHE_ENABLED` is off |
 
 Copy `.env.example` → `.env` to get started.
 

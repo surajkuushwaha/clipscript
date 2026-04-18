@@ -23,14 +23,25 @@ func DownloadAudio(ctx context.Context, url, proxyURL string) (string, error) {
 	// Remove the empty placeholder so yt-dlp can write to the path freely.
 	_ = os.Remove(tmpPath)
 
-	// finalPath is the path yt-dlp will write: same stem, .mp3 extension.
-	// We compute it explicitly so the Stat check is unambiguous.
 	finalPath := strings.TrimSuffix(tmpPath, filepath.Ext(tmpPath)) + ".mp3"
+	if err := DownloadAudioTo(ctx, url, proxyURL, finalPath); err != nil {
+		return "", err
+	}
+	return finalPath, nil
+}
+
+// DownloadAudioTo downloads audio-only from url to outPath as mp3.
+// Writes to a .part file first, then renames to outPath. Caller supplies the final path.
+// proxyURL may be empty for no proxy.
+func DownloadAudioTo(ctx context.Context, url, proxyURL, outPath string) error {
+	stem := strings.TrimSuffix(outPath, filepath.Ext(outPath))
+	partPattern := stem + ".part.%(ext)s"
+	partFinal := stem + ".part.mp3"
 
 	dl := ytdlp.New().
 		ExtractAudio().
 		AudioFormat("mp3").
-		Output(strings.TrimSuffix(tmpPath, filepath.Ext(tmpPath)) + ".%(ext)s")
+		Output(partPattern)
 
 	if proxyURL != "" {
 		dl = dl.Proxy(proxyURL)
@@ -41,16 +52,21 @@ func DownloadAudio(ctx context.Context, url, proxyURL string) (string, error) {
 	}
 
 	if _, err := dl.Run(ctx, url); err != nil {
-		_ = os.Remove(finalPath)
-		return "", fmt.Errorf("yt-dlp: %w", err)
+		_ = os.Remove(partFinal)
+		return fmt.Errorf("yt-dlp: %w", err)
 	}
 
-	if _, err := os.Stat(finalPath); err != nil {
-		_ = os.Remove(finalPath)
-		return "", fmt.Errorf("audio file not found after download: %w", err)
+	if _, err := os.Stat(partFinal); err != nil {
+		_ = os.Remove(partFinal)
+		return fmt.Errorf("audio file not found after download: %w", err)
 	}
 
-	return finalPath, nil
+	_ = os.Remove(outPath) // replace existing
+	if err := os.Rename(partFinal, outPath); err != nil {
+		_ = os.Remove(partFinal)
+		return fmt.Errorf("rename audio file: %w", err)
+	}
+	return nil
 }
 
 func truthyEnv(key string) bool {
